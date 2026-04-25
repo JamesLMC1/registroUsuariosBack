@@ -289,8 +289,9 @@ app.post("/notas", async (req, res) => {
     });
   }
 
-  // Calcular la definitiva al momento de insertar
-  const definitiva = (nota1 + nota2 + nota3 + nota4) / 4;
+  const definitiva = parseFloat(
+    ((nota1 + nota2 + nota3 + nota4) / 4).toFixed(2)
+  );
 
   const { data, error } = await supabase
     .from("notas")
@@ -302,7 +303,10 @@ app.post("/notas", async (req, res) => {
     return res.status(500).json({ error: "Error al registrar notas" });
   }
 
-  return res.status(201).json({ mensaje: "Notas registradas", notas: data });
+  return res.status(201).json({
+    mensaje: "Notas registradas",
+    notas: data,
+  });
 });
 
 // -------------------------------------------------------------
@@ -350,15 +354,12 @@ app.get("/definitiva", async (req, res) => {
     return res.status(404).json({ error: "No se encontraron notas registradas" });
   }
 
-  // Re-calcular en caso de que el valor guardado difiera
-  const definitiva = (data.nota1 + data.nota2 + data.nota3 + data.nota4) / 4;
-
   return res.json({
     nota1: data.nota1,
     nota2: data.nota2,
     nota3: data.nota3,
     nota4: data.nota4,
-    definitiva: parseFloat(definitiva.toFixed(2)),
+    definitiva: data.definitiva,
   });
 });
 
