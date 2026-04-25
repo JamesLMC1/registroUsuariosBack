@@ -1,32 +1,18 @@
 // =============================================================
 // server.js  —  API de Notas Estudiantiles
-// Stack : Node.js · Express · @supabase/supabase-js · Swagger
+// Stack : Node.js (http nativo) · @supabase/supabase-js
 // Deploy: Railway  |  DB: Supabase (PostgreSQL)
 // =============================================================
 
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
 }
-const express = require("express");
-const { createClient } = require("@supabase/supabase-js");
-const swaggerUi = require("swagger-ui-express");
-const swaggerJsdoc = require("swagger-jsdoc");
 
-const app = express();
-app.use(express.json());
-// CORS
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
-});
+const http = require("http");
+const { createClient } = require("@supabase/supabase-js");
+
 // -------------------------------------------------------------
-// 1. CLIENTE SUPABASE
-//    Variables de entorno requeridas (configurar en Railway):
-//      SUPABASE_URL   → URL del proyecto en Supabase
-//      SUPABASE_KEY   → anon/service_role key de Supabase
+// CLIENTE SUPABASE
 // -------------------------------------------------------------
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -34,341 +20,235 @@ const supabase = createClient(
 );
 
 // -------------------------------------------------------------
-// 2. SWAGGER — Documentación automática en /api-docs
+// HELPERS
 // -------------------------------------------------------------
-const swaggerOptions = {
-  definition: {
-    openapi: "3.0.0",
-    info: {
-      title: "API de Notas Estudiantiles",
-      version: "1.0.0",
-      description: "Endpoints para gestión de estudiantes y sus notas",
-    },
-    servers: [
-      {
-        url: process.env.BASE_URL || "http://localhost:3000",
-        description: "Servidor activo",
-      },
-    ],
-  },
-  apis: ["./server.js"], // Swagger lee los comentarios JSDoc de este mismo archivo
-};
 
-const swaggerSpec = swaggerJsdoc(swaggerOptions);
-app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
-// =============================================================
-// PANTALLA 1 — Consultar notas de un estudiante
-// =============================================================
-
-/**
- * @swagger
- * /notas:
- *   get:
- *     summary: Consultar notas por cédula y nombre
- *     tags: [Pantalla 1 - Notas]
- *     parameters:
- *       - in: query
- *         name: cedula
- *         required: true
- *         schema:
- *           type: string
- *         description: Cédula del estudiante
- *       - in: query
- *         name: nombre
- *         required: true
- *         schema:
- *           type: string
- *         description: Nombre del estudiante
- *     responses:
- *       200:
- *         description: Notas del estudiante encontradas
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 estudiante:
- *                   type: object
- *                 notas:
- *                   type: array
- *       400:
- *         description: Faltan parámetros requeridos
- *       404:
- *         description: Estudiante no encontrado
- */
-app.get("/notas", async (req, res) => {
-  const { cedula, nombre } = req.query;
-
-  // Validar que lleguen ambos parámetros
-  if (!cedula || !nombre) {
-    return res
-      .status(400)
-      .json({ error: "Se requieren los parámetros 'cedula' y 'nombre'" });
-  }
-
-  // Buscar estudiante en la tabla "estudiantes"
-  const { data: estudiante, error: errEst } = await supabase
-    .from("estudiantes")
-    .select("*")
-    .eq("cedula", cedula)
-    .ilike("nombre", nombre) // ilike = insensible a mayúsculas
-    .single();
-
-  if (errEst || !estudiante) {
-    return res.status(404).json({ error: "Estudiante no encontrado" });
-  }
-
-  // Obtener las notas de ese estudiante
-  const { data: notas, error: errNotas } = await supabase
-    .from("notas")
-    .select("materia, nota1, nota2, nota3, nota4, definitiva")
-    .eq("estudiante_id", estudiante.id);
-
-  if (errNotas) {
-    return res.status(500).json({ error: "Error al consultar notas" });
-  }
-
-  return res.json({ estudiante, notas });
-});
-
-// =============================================================
-// PANTALLA 2 — Registrar un nuevo estudiante
-// =============================================================
-
-/**
- * @swagger
- * /estudiantes:
- *   post:
- *     summary: Registrar un nuevo estudiante
- *     tags: [Pantalla 2 - Registro]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [cedula, nombre, correo, celular, materia]
- *             properties:
- *               cedula:
- *                 type: string
- *               nombre:
- *                 type: string
- *               correo:
- *                 type: string
- *               celular:
- *                 type: string
- *               materia:
- *                 type: string
- *     responses:
- *       201:
- *         description: Estudiante registrado correctamente
- *       400:
- *         description: Faltan campos requeridos
- *       409:
- *         description: La cédula ya está registrada
- */
-app.post("/estudiantes", async (req, res) => {
-  const { cedula, nombre, correo, celular, materia } = req.body;
-
-  // Validar campos obligatorios
-  if (!cedula || !nombre || !correo || !celular || !materia) {
-    return res.status(400).json({
-      error: "Todos los campos son requeridos: cedula, nombre, correo, celular, materia",
+// Parsear el body JSON de la petición
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch {
+        reject(new Error("JSON inválido"));
+      }
     });
+    req.on("error", reject);
+  });
+}
+
+// Enviar respuesta JSON
+function sendJSON(res, statusCode, data) {
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  });
+  res.end(JSON.stringify(data));
+}
+
+// Parsear query params de la URL
+function getQuery(req) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const params = {};
+  url.searchParams.forEach((value, key) => {
+    params[key] = value;
+  });
+  return { pathname: url.pathname, params };
+}
+
+// -------------------------------------------------------------
+// SERVIDOR
+// -------------------------------------------------------------
+const server = http.createServer(async (req, res) => {
+  const { pathname, params } = getQuery(req);
+
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    res.writeHead(200, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    });
+    return res.end();
   }
 
-  // Insertar el estudiante en la tabla "estudiantes"
-  const { data, error } = await supabase
-    .from("estudiantes")
-    .insert([{ cedula, nombre, correo, celular, materia }])
-    .select()
-    .single();
+  // =============================================================
+  // PANTALLA 1 — GET /notas
+  // =============================================================
+  if (req.method === "GET" && pathname === "/notas") {
+    const { cedula, nombre } = params;
 
-  if (error) {
-    // Código 23505 = violación de unique constraint (cédula duplicada)
-    if (error.code === "23505") {
-      return res.status(409).json({ error: "La cédula ya está registrada" });
+    if (!cedula || !nombre) {
+      return sendJSON(res, 400, {
+        error: "Se requieren los parámetros 'cedula' y 'nombre'",
+      });
     }
-    return res.status(500).json({ error: "Error al registrar estudiante" });
+
+    const { data: estudiante, error: errEst } = await supabase
+      .from("estudiantes")
+      .select("*")
+      .eq("cedula", cedula)
+      .ilike("nombre", nombre)
+      .single();
+
+    if (errEst || !estudiante) {
+      return sendJSON(res, 404, { error: "Estudiante no encontrado" });
+    }
+
+    const { data: notas, error: errNotas } = await supabase
+      .from("notas")
+      .select("materia, nota1, nota2, nota3, nota4, definitiva")
+      .eq("estudiante_id", estudiante.id);
+
+    if (errNotas) {
+      return sendJSON(res, 500, { error: "Error al consultar notas" });
+    }
+
+    return sendJSON(res, 200, { estudiante, notas });
   }
 
-  return res.status(201).json({ mensaje: "Estudiante registrado", estudiante: data });
-});
+  // =============================================================
+  // PANTALLA 2 — POST /estudiantes
+  // =============================================================
+  if (req.method === "POST" && pathname === "/estudiantes") {
+    let body;
+    try {
+      body = await parseBody(req);
+    } catch {
+      return sendJSON(res, 400, { error: "Body JSON inválido" });
+    }
 
-// =============================================================
-// PANTALLA 3 — Buscar estudiante, registrar notas y calcular definitiva
-// =============================================================
+    const { cedula, nombre, correo, celular, materia } = body;
 
-/**
- * @swagger
- * /buscar-estudiante:
- *   get:
- *     summary: Buscar estudiante para registrar notas (pantalla 3)
- *     tags: [Pantalla 3 - Notas]
- *     parameters:
- *       - in: query
- *         name: cedula
- *         required: true
- *         schema:
- *           type: string
- *       - in: query
- *         name: nombre
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Estudiante encontrado
- *       404:
- *         description: Estudiante no encontrado
- */
-app.get("/buscar-estudiante", async (req, res) => {
-  const { cedula, nombre } = req.query;
+    if (!cedula || !nombre || !correo || !celular || !materia) {
+      return sendJSON(res, 400, {
+        error: "Todos los campos son requeridos: cedula, nombre, correo, celular, materia",
+      });
+    }
 
-  if (!cedula || !nombre) {
-    return res
-      .status(400)
-      .json({ error: "Se requieren los parámetros 'cedula' y 'nombre'" });
+    const { data, error } = await supabase
+      .from("estudiantes")
+      .insert([{ cedula, nombre, correo, celular, materia }])
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") {
+        return sendJSON(res, 409, { error: "La cédula ya está registrada" });
+      }
+      return sendJSON(res, 500, { error: "Error al registrar estudiante" });
+    }
+
+    return sendJSON(res, 201, { mensaje: "Estudiante registrado", estudiante: data });
   }
 
-  const { data, error } = await supabase
-    .from("estudiantes")
-    .select("*")
-    .eq("cedula", cedula)
-    .ilike("nombre", nombre)
-    .single();
+  // =============================================================
+  // PANTALLA 3 — GET /buscar-estudiante
+  // =============================================================
+  if (req.method === "GET" && pathname === "/buscar-estudiante") {
+    const { cedula, nombre } = params;
 
-  if (error || !data) {
-    return res.status(404).json({ error: "Estudiante no encontrado" });
+    if (!cedula || !nombre) {
+      return sendJSON(res, 400, {
+        error: "Se requieren los parámetros 'cedula' y 'nombre'",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("estudiantes")
+      .select("*")
+      .eq("cedula", cedula)
+      .ilike("nombre", nombre)
+      .single();
+
+    if (error || !data) {
+      return sendJSON(res, 404, { error: "Estudiante no encontrado" });
+    }
+
+    return sendJSON(res, 200, { estudiante: data });
   }
 
-  return res.json({ estudiante: data });
+  // =============================================================
+  // PANTALLA 3 — POST /notas
+  // =============================================================
+  if (req.method === "POST" && pathname === "/notas") {
+    let body;
+    try {
+      body = await parseBody(req);
+    } catch {
+      return sendJSON(res, 400, { error: "Body JSON inválido" });
+    }
+
+    const { estudiante_id, materia, nota1, nota2, nota3, nota4 } = body;
+
+    if (
+      !estudiante_id ||
+      !materia ||
+      nota1 == null ||
+      nota2 == null ||
+      nota3 == null ||
+      nota4 == null
+    ) {
+      return sendJSON(res, 400, {
+        error: "Se requieren: estudiante_id, materia, nota1, nota2, nota3, nota4",
+      });
+    }
+
+    const definitiva = parseFloat(
+      ((nota1 + nota2 + nota3 + nota4) / 4).toFixed(2)
+    );
+
+    const { data, error } = await supabase
+      .from("notas")
+      .insert([{ estudiante_id, materia, nota1, nota2, nota3, nota4, definitiva }])
+      .select()
+      .single();
+
+    if (error) {
+      return sendJSON(res, 500, { error: "Error al registrar notas" });
+    }
+
+    return sendJSON(res, 201, { mensaje: "Notas registradas", notas: data });
+  }
+
+  // =============================================================
+  // PANTALLA 3 — GET /definitiva
+  // =============================================================
+  if (req.method === "GET" && pathname === "/definitiva") {
+    const { estudiante_id, materia } = params;
+
+    if (!estudiante_id || !materia) {
+      return sendJSON(res, 400, {
+        error: "Se requieren 'estudiante_id' y 'materia'",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("notas")
+      .select("nota1, nota2, nota3, nota4, definitiva")
+      .eq("estudiante_id", estudiante_id)
+      .eq("materia", materia)
+      .single();
+
+    if (error || !data) {
+      return sendJSON(res, 404, { error: "No se encontraron notas registradas" });
+    }
+
+    return sendJSON(res, 200, data);
+  }
+
+  // Ruta no encontrada
+  sendJSON(res, 404, { error: "Ruta no encontrada" });
 });
 
 // -------------------------------------------------------------
-
-/**
- * @swagger
- * /notas:
- *   post:
- *     summary: Registrar las 4 notas de un estudiante
- *     tags: [Pantalla 3 - Notas]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [estudiante_id, materia, nota1, nota2, nota3, nota4]
- *             properties:
- *               estudiante_id:
- *                 type: integer
- *               materia:
- *                 type: string
- *               nota1:
- *                 type: number
- *               nota2:
- *                 type: number
- *               nota3:
- *                 type: number
- *               nota4:
- *                 type: number
- *     responses:
- *       201:
- *         description: Notas registradas correctamente
- *       400:
- *         description: Datos incompletos o inválidos
- */
-app.post("/notas", async (req, res) => {
-  const { estudiante_id, materia, nota1, nota2, nota3, nota4 } = req.body;
-
-  if (!estudiante_id || !materia || nota1 == null || nota2 == null || nota3 == null || nota4 == null) {
-    return res.status(400).json({
-      error: "Se requieren: estudiante_id, materia, nota1, nota2, nota3, nota4",
-    });
-  }
-
-  const definitiva = parseFloat(
-    ((nota1 + nota2 + nota3 + nota4) / 4).toFixed(2)
-  );
-
-  const { data, error } = await supabase
-    .from("notas")
-    .insert([{ estudiante_id, materia, nota1, nota2, nota3, nota4, definitiva }])
-    .select()
-    .single();
-
-  if (error) {
-    return res.status(500).json({ error: "Error al registrar notas" });
-  }
-
-  return res.status(201).json({
-    mensaje: "Notas registradas",
-    notas: data,
-  });
-});
-
-// -------------------------------------------------------------
-
-/**
- * @swagger
- * /definitiva:
- *   get:
- *     summary: Calcular y retornar la definitiva de un estudiante
- *     tags: [Pantalla 3 - Notas]
- *     parameters:
- *       - in: query
- *         name: estudiante_id
- *         required: true
- *         schema:
- *           type: integer
- *       - in: query
- *         name: materia
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: Definitiva calculada
- *       404:
- *         description: No se encontraron notas para ese estudiante y materia
- */
-app.get("/definitiva", async (req, res) => {
-  const { estudiante_id, materia } = req.query;
-
-  if (!estudiante_id || !materia) {
-    return res
-      .status(400)
-      .json({ error: "Se requieren 'estudiante_id' y 'materia'" });
-  }
-
-  const { data, error } = await supabase
-    .from("notas")
-    .select("nota1, nota2, nota3, nota4, definitiva")
-    .eq("estudiante_id", estudiante_id)
-    .eq("materia", materia)
-    .single();
-
-  if (error || !data) {
-    return res.status(404).json({ error: "No se encontraron notas registradas" });
-  }
-
-  return res.json({
-    nota1: data.nota1,
-    nota2: data.nota2,
-    nota3: data.nota3,
-    nota4: data.nota4,
-    definitiva: data.definitiva,
-  });
-});
-
-// =============================================================
 // INICIO DEL SERVIDOR
-//    PORT la provee Railway automáticamente
-// =============================================================
+// -------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Servidor corriendo en el puerto ${PORT}`);
-  console.log(`Documentación Swagger: http://localhost:${PORT}/api-docs`);
 });
