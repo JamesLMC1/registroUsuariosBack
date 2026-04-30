@@ -12,9 +12,18 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.104.0",
+    "@supabase/supabase-js": "^2.105.1",
     "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JamesLMC1/registroUsuariosBack.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JamesLMC1/registroUsuariosBack/issues"
+  },
+  "homepage": "https://github.com/JamesLMC1/registroUsuariosBack#readme"
 }
