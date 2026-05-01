@@ -99,10 +99,10 @@ app.get("/notas", async (req, res) => {
   const { cedula, nombre } = req.query;
 
   // Validar que lleguen ambos parámetros
-  if (!cedula || !nombre) {
+  if (!cedula) {
     return res
       .status(400)
-      .json({ error: "Se requieren los parámetros 'cedula' y 'nombre'" });
+      .json({ error: "Se requieren los parámetros 'cedula'" });
   }
 
   // Buscar estudiante en la tabla "estudiantes"
@@ -110,7 +110,6 @@ app.get("/notas", async (req, res) => {
     .from("estudiantes")
     .select("*")
     .eq("cedula", cedula)
-    .ilike("nombre", nombre) // ilike = insensible a mayúsculas
     .single();
 
   if (errEst || !estudiante) {
@@ -224,17 +223,16 @@ app.post("/estudiantes", async (req, res) => {
 app.get("/buscar-estudiante", async (req, res) => {
   const { cedula, nombre } = req.query;
 
-  if (!cedula || !nombre) {
+  if (!cedula) {
     return res
       .status(400)
-      .json({ error: "Se requieren los parámetros 'cedula' y 'nombre'" });
+      .json({ error: "Se requieren los parámetros 'cedula'" });
   }
 
   const { data, error } = await supabase
     .from("estudiantes")
     .select("*")
     .eq("cedula", cedula)
-    .ilike("nombre", nombre)
     .single();
 
   if (error || !data) {
