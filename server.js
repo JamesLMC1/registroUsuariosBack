@@ -13,6 +13,13 @@ const swaggerJsdoc = require("swagger-jsdoc");
 const app = express();
 app.use(express.json());
 
+const cors = require("cors");
+
+app.use(cors({
+  origin: "https://registrousuariosfront-production.up.railway.app",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 // -------------------------------------------------------------
 // 1. CLIENTE SUPABASE
 //    Variables de entorno requeridas (configurar en Railway):
